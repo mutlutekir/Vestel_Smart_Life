@@ -61,6 +61,10 @@ the result is printed as `%05d` decimal.
 | `ACQOFFT` | quick-off hour (5), minute (6) |
 | `ACSTCLK` | clock hour (5), minute (6) |
 
+The unit cannot learn the time on its own, and `ACOFFTV` is a target clock time, so the app
+sets the unit's clock (`ACSTCLK`, phone local time) whenever its timer screen is opened
+(`ACTimingFunctionsPresenter`). The integration does the same right before it sends `ACOFFTV`.
+
 Other command names seen in `ACCloudCommands`: `ACROOTE`, `ACERROR`, `ACVERSI`,
 `ACUVSET`, `ACRGBON`, `ACRGBBR`, `ACRGBST`, `ACPOLPM`, `ACPOLVC`, `ACSAFRS`,
 `ACPSCLP`, `ACOAFLP`, `ACERRTW`, `ACWARNG`, `ACEXERR`, `ACCMODE`.
@@ -125,3 +129,47 @@ MQTT runs over WebSocket on port 443 with a SigV4-presigned `/mqtt` URL (service
 - The body of `POST v1.0/appliances/{uuid}/command` for appliances other than locks.
   Commands currently go through `legacy/command`, whose body is known.
 - Status and command details for appliance families other than AC.
+
+## Refrigerators (`RF`)
+
+Registers are read with `GET v1.0/homeappliances/legacy/status?uuid=<id>`, which answers
+`{"status": ..., "data": {"RFDOORA": "00003", ...}}` (the app drops entries whose value is `null`).
+Commands go through the same `legacy/command` endpoint as for the AC, with the device's own
+`device_type` (`RF`) and `wifi_card_type`.
+
+| Register | Meaning (from `RFCloudEntityToCloudDomain` / `RFCloudDomainToCloudEntity`) |
+|---|---|
+| `RFDOORA` | 3 = both doors closed; the app treats every other value as open. The bundled sample lists 0 freezer open, 1 cooler open, 2 both open; an observation on a real fridge says 1 = cooler door open. The meaning of 0 and 2 is not settled. |
+| `RFTEMSE` | cooler degrees C in the high byte, absolute freezer degrees C in the low byte (the freezer is below zero). Written as `(cooler << 8) \| abs(freezer)`, `%05d`. Sample document: cooler 2/4/5/6/8, freezer 16/18/20/22/24. |
+| `RFMODEA` | one mode at a time: 0 Normal, 2 SuperFreeze, 4 SuperCooler, 8 Holiday, 16 Eco, 32 AI. |
+| `RFCLOCK`, `RFSSAVE` | child lock, screen saver: 0 / 1. |
+| `RFDCOOL` | quick-drink state (sample: 0 open, 1 closed, 2 finished). No command is implemented. |
+| `RFCOOER`, `RFDEFEC` | bit fields of cooler and defrost errors (4 and 11 one-bit fields). Not decoded. |
+| `RFFRZTE`, `RFCOOTE`, `RFDEFTE`, `RFCDSTE`, `RFAMBTE` | sensor temperatures in the sample (range -50..50); their encoding is not confirmed. |
+
+The app's own class for the commands could not be decompiled in the normal mode; the
+packing above was read from jadx's fallback output of `RFCloudDomainToCloudEntity`.
+The fridge-freezer family (`FD`) has its own command set (`FDCloudCommands`) and is not handled.
+
+## Other families (`WM`, `WD`, `TD`, `DW`, `OV`, `FD`)
+
+Same endpoints as for refrigerators: registers from `legacy/status`, commands through
+`legacy/command` (not implemented here). Each family has a register prefix (`WM...`, `WD...`, ...).
+The layout of every register (position and length of the values inside it, the meaning of each
+value, the error lists) comes from the sample documents the app bundles (`assets/demo_*.json`);
+`tools/extract_registers.py` condenses them into `appliances.py`.
+
+Two styles of error registers occur: one code per error (washers, dishwashers, dryers; the value
+for "no error" is 0, or 15 for dryers) and one bit per error (ovens, fridge-freezers).
+
+Commands seen in the sample documents (all start or control a program, none are sent by this integration):
+`WMDCPST` / `WDDCPST` 1 start, 2 delay, 3 pause; `DWPROST` 0 pre-program, 1 running, 2 pause;
+`TDSTART` 2; `OVGENMO` 0 off, 1 config, 2 start, 3 stop, 8 continue.
+
+Unconfirmed: the unit of the delay registers (the documents say hour, the range 0-1380 fits minutes),
+and the encoding of the sensor temperatures of fridge-freezers (`FDFRZTE`, ...).
+
+## Codes to try on real devices
+
+`docs/device-testing.md` lists the commands found in the app for every family, grouped by risk, with the expected
+effect, so that owners of those devices can test them with `send_raw_code` and report the result.
