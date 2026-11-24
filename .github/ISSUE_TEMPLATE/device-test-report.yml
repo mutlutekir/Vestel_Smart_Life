@@ -1,0 +1,66 @@
+name: Device test report / Cihaz test raporu
+description: Report what happened when you tried the codes in docs/device-testing.md on your appliance.
+title: "[Device test] <appliance> <model>"
+labels: ["device-test"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for testing! / Test ettiğin için teşekkürler!
+        Guide / Rehber: [docs/device-testing.md](https://github.com/mutlutekir/Vestel_Smart_Life/blob/main/docs/device-testing.md).
+        Please do not paste passwords or tokens. / Şifre ya da token yapıştırma.
+  - type: dropdown
+    id: family
+    attributes:
+      label: Appliance / Cihaz
+      options:
+        - Refrigerator (RF) / Buzdolabı
+        - Fridge-freezer (FD) / Buzdolabı-dondurucu
+        - Washing machine (WM) / Çamaşır makinesi
+        - Washer-dryer (WD) / Kurutmalı çamaşır makinesi
+        - Tumble dryer (TD) / Kurutma makinesi
+        - Dishwasher (DW) / Bulaşık makinesi
+        - Oven (OV) / Fırın
+        - Air conditioner (AC) / Klima
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Brand and model / Marka ve model
+      placeholder: "Vestel ... (as printed on the label or shown in the app)"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Integration version / Entegrasyon sürümü
+      placeholder: "2.1.0"
+    validations:
+      required: true
+  - type: textarea
+    id: results
+    attributes:
+      label: Results / Sonuçlar
+      description: One line per code. What did the appliance and the Smart Life app do? "Nothing" is a valid answer. / Her kod için bir satır. Cihaz ve uygulama ne yaptı? "Hiçbir şey" de geçerli bir cevap.
+      placeholder: |
+        RFCLOCK00001 → child lock icon appeared on the display, app followed after ~15 s
+        WMUISET01283 → nothing changed on the display, register stayed the same
+    validations:
+      required: true
+  - type: textarea
+    id: observations
+    attributes:
+      label: Observations / Gözlemler
+      description: Raw status in the states of the "Observations" table (door open, running, delay set, ...). / "Gözlemler" tablosundaki durumlarda ham durum.
+      render: text
+  - type: textarea
+    id: before_after
+    attributes:
+      label: Raw status before and after / Önceki ve sonraki ham durum
+      description: Output of `vestel_smart_life.dump_raw_status`. / `dump_raw_status` çıktısı.
+      render: text
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else / Eklemek istediklerin
