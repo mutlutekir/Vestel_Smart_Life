@@ -22,16 +22,15 @@
 
 # 🇬🇧 English
 
-Vestel Smart Life is an unofficial Home Assistant custom integration for devices in the Vestel Smart Life / Evin Aklı app. Air conditioners (Doğa / Flora series) are supported today; other appliance families are planned.
+Vestel Smart Life is an unofficial Home Assistant custom integration for devices in the Vestel Smart Life / Evin Aklı app. Air conditioners (Doğa / Flora series) and refrigerators can be controlled; washing machines, dryers, dishwashers, ovens and fridge-freezers are shown read only.
 
 > **Upgrading from 1.0.x ("Vestel AC")?** The integration now has its own domain, `vestel_smart_life`. Remove the old *Vestel AC* entry, install this version and add *Vestel Smart Life* again. Entity IDs change.
-
 
 It communicates directly with the Vestel Smart Life cloud API and provides advanced controls that are not normally exposed by Home Assistant.
 
 > ⚠️ This is an unofficial community project and is not affiliated with Vestel.
 
-> **Tested on:** one air conditioner (variant `FLORA#MELTEM`, Wi-Fi card `HM07`). Other models should work for the common controls but are untested; please attach the diagnostics when reporting a problem.
+> **Tested on:** one air conditioner (variant `FLORA#MELTEM`, Wi-Fi card `HM07`). Other models should work for the common controls but are untested; please attach the diagnostics when reporting a problem. Refrigerator support (see below) is new and has not been tried on a real refrigerator yet; other appliance families are read only and untested too.
 
 ## ✨ Features
 
@@ -48,6 +47,8 @@ It communicates directly with the Vestel Smart Life cloud API and provides advan
 - 🩺 Diagnostic information
 - 🌫️ VOC / particle air-quality information on supported models
 - 🧹 Filter / particle-sensor lifetime information where available
+- 🧊 Refrigerators: door, temperatures, modes, child lock, screen saver
+- 🏠 Washing machines, dryers, dishwashers, ovens and fridge-freezers: state, program, remaining time and errors (read only)
 - 🧪 Raw API status and command services
 - 🔐 Automatic authentication with Vestel account credentials
 - 📡 Live state: changes made with the remote control or the app show up within seconds
@@ -103,7 +104,7 @@ The integration supports:
 - Username / password login
 - Refresh-token authentication as a fallback
 
-After authentication, available Vestel air conditioners are automatically discovered.
+After authentication, the Vestel devices on your account (air conditioners, refrigerators and the other appliances) are discovered automatically.
 
 ---
 
@@ -235,6 +236,34 @@ Example:
 
     14:18 → 00590
 
+The value is a clock time, and the unit cannot learn the time on its own. So, like the official app, the integration first sets the unit's clock to Home Assistant's local time (`ACSTCLK`) and then sends the shutdown time.
+
+---
+
+## 🧊 Refrigerators
+
+Vestel refrigerators (device type `RF`) on the same account are discovered too. The registers and their packing come from the Smart Life app's own code and the sample documents bundled in it.
+
+| Entity | Register | Notes |
+|---|---|---|
+| Door (binary sensor) | `RFDOORA` | Open for any value other than `3` (both closed), as the app does. Which door is open is not exposed; the raw value is an attribute. |
+| Cooler / freezer temperature (select) | `RFTEMSE` | `(cooler °C << 8) \| abs(freezer °C)`. Choices: cooler 2, 4, 5, 6, 8 °C; freezer -16, -18, -20, -22, -24 °C. |
+| Mode (select) | `RFMODEA` | Normal, Super Freeze, Super Cooler, Holiday, Eco, AI. One at a time; your model may not support all of them. |
+| Child lock, Screen saver (switch) | `RFCLOCK`, `RFSSAVE` | 0 / 1. |
+| Raw registers (diagnostic sensors, off by default) | all | Enable them to see what a button changes. |
+
+> ⚠️ **Not yet verified on a real refrigerator.** Reading is cross-checked with observations from a real fridge ([tmturk2010](https://github.com/tmturk2010), PR #1 — thank you); the commands are built exactly as the app builds them, but nobody has confirmed them on hardware. Please try one change at a time, watch the fridge's own display, and report what happened. Refrigerators are polled (no live messages yet), so the door sensor can be about a minute late.
+
+---
+
+## 🏠 Other appliances (read only)
+
+Washing machines (`WM`), washer-dryers (`WD`), tumble dryers (`TD`), dishwashers (`DW`), ovens (`OV`) and fridge-freezers (`FD`) on the account are discovered as well and show what the app shows: state, selected program, remaining time, door, remote control, child lock and errors (a "problem" sensor lists the active errors). Values come from the register tables the Smart Life app ships for each family (`tools/extract_registers.py` rebuilds them).
+
+- **Read only on purpose.** The app's commands for these appliances start programs; starting a wash or heating an oven from Home Assistant has not been tried and is left out. The `send_raw_code` service is still there for experiments.
+- **Not verified on real appliances.** Value names are the app's own (English); tell me what looks wrong. Sensor temperatures of fridge-freezers (`FD`) are decoded as signed numbers, which is a guess.
+- Polled about once a minute.
+
 ---
 
 ## 🩺 Diagnostic Data
@@ -281,6 +310,8 @@ These services are mainly intended for development and reverse engineering.
 
 > ⚠️ Do not send unknown values to the device. Incorrect commands may change its operating state.
 
+**Own one of the other appliances?** [`docs/device-testing.md`](docs/device-testing.md) lists the codes worth trying on a refrigerator, washing machine, dryer, dishwasher and so on, what each should do, and how to report the result by opening an issue.
+
 ---
 
 ## 🔍 Feature Discovery
@@ -303,13 +334,12 @@ Recommended workflow:
 
 ---
 
-### Credits
+## ❤️ Credits
 
 - Developed and maintained by **Mutlu Tekir**.
 - Inspired by **Sezer İltekin**'s vestel-ac-remote-control web-panel.
 Sezer İltekin's project was an early public exploration of the Vestel cloud. The API client in this integration is a separate, new implementation: it is written from the Vestel Smart Life app's own code (APK analysis) and from responses observed on a real account, and no code was taken from that project. See `docs/protocol.md` for the sources.
 - Licensed under GPL-3.0, see [LICENSE](LICENSE).
-
 
 ---
 
@@ -333,14 +363,15 @@ Do not include passwords, access tokens or refresh tokens in issue reports.
 
 # 🇹🇷 Türkçe
 
-Vestel Smart Life, Vestel Smart Life / Evin Aklı uygulamasındaki cihazları Home Assistant üzerinden kontrol etmek için geliştirilmiş resmi olmayan bir özel entegrasyondur. Şu an klimalar destekleniyor, diğer cihaz aileleri planlanıyor.
+Vestel Smart Life, Vestel Smart Life / Evin Aklı uygulamasındaki cihazları Home Assistant üzerinden kontrol etmek için geliştirilmiş resmi olmayan bir özel entegrasyondur. Klimalar ve buzdolapları kontrol edilebiliyor; çamaşır makinesi, kurutma makinesi, bulaşık makinesi, fırın ve buzdolabı-dondurucu salt okunur gösteriliyor.
 
 > **1.0.x ("Vestel AC") sürümünden mi geliyorsun?** Entegrasyonun yeni bir alan adı var: `vestel_smart_life`. Eski *Vestel AC* girdisini sil, bu sürümü kur ve *Vestel Smart Life*'ı yeniden ekle. Entity kimlikleri değişir.
 
-
-Vestel Akıllı Yaşam bulut API'si ile doğrudan iletişim kurar ve Home Assistant'ta normalde bulunmayan gelişmiş klima kontrollerini sunar.
+Vestel Akıllı Yaşam bulut API'si ile doğrudan iletişim kurar ve Home Assistant'ta normalde bulunmayan gelişmiş kontrolleri sunar.
 
 > ⚠️ Bu proje resmi değildir ve Vestel ile herhangi bir bağlantısı yoktur.
+
+> **Test edilen:** tek bir klima (varyant `FLORA#MELTEM`, Wi-Fi kartı `HM07`). Diğer modellerde ortak kontroller çalışmalı ama test edilmedi; sorun bildirirken tanı verisini (diagnostics) ekle. Buzdolabı desteği (aşağıya bak) yenidir ve henüz gerçek bir buzdolabında denenmedi; diğer cihaz aileleri salt okunurdur ve onlar da test edilmedi.
 
 ## ✨ Özellikler
 
@@ -357,8 +388,11 @@ Vestel Akıllı Yaşam bulut API'si ile doğrudan iletişim kurar ve Home Assist
 - 🩺 Tanı / hata bilgileri
 - 🌫️ Desteklenen modellerde VOC / partikül hava kalitesi
 - 🧹 Desteklenen modellerde filtre / partikül sensörü ömrü
+- 🧊 Buzdolabı: kapı, sıcaklıklar, modlar, çocuk kilidi, ekran koruyucu
+- 🏠 Çamaşır makinesi, kurutma makinesi, bulaşık makinesi, fırın ve buzdolabı-dondurucu: durum, program, kalan süre ve hatalar (salt okunur)
 - 🧪 Ham API durum ve komut servisleri
 - 🔐 Vestel hesabıyla otomatik kimlik doğrulama
+- 📡 Canlı durum: kumanda ya da uygulamadan yapılan değişiklikler birkaç saniyede görünür
 
 ---
 
@@ -415,7 +449,7 @@ Kimlik doğrulama için:
 
 kullanılabilir.
 
-Kimlik doğrulama tamamlandıktan sonra kullanılabilir Vestel klimalar otomatik olarak keşfedilir.
+Kimlik doğrulama tamamlandıktan sonra hesabındaki Vestel cihazlar (klimalar, buzdolapları ve diğer cihazlar) otomatik olarak keşfedilir.
 
 ---
 
@@ -518,6 +552,14 @@ değeri gözlemlenmiştir.
 
 ---
 
+## 📡 Canlı Durum
+
+Cihaz, bir şey değiştiğinde (kumanda, tuşlar, uygulama, Home Assistant) Vestel bulutuna mesaj yayınlar. Entegrasyon resmi uygulama gibi bu mesajları dinler; böylece kart gerçek durumu birkaç saniye içinde gösterir. Bunun için `paho-mqtt` paketi gerekir, Home Assistant bunu entegrasyon için otomatik kurar.
+
+Bulutun durum belgesi (dakikada bir sorgulanır) yedek olarak durur: dakikalarca geride kalabilir ve aç/kapa değişikliğini güvenilir bildirmez. Canlı bağlantı açılamazsa entegrasyon bir uyarı yazar ve sorgulamaya devam eder.
+
+---
+
 ## ⏰ Otomatik Kapatma
 
 `ACOFFTV` otomatik kapanma saatini tutar:
@@ -529,6 +571,34 @@ değeri gözlemlenmiştir.
 Örneğin:
 
     14:18 → 00590
+
+Değer bir saat bilgisidir ve cihaz saati kendi başına öğrenemez. Bu yüzden entegrasyon, resmi uygulama gibi, önce cihazın saatini Home Assistant'ın yerel saatine ayarlar (`ACSTCLK`), sonra kapanma saatini gönderir.
+
+---
+
+## 🧊 Buzdolapları
+
+Aynı hesaptaki Vestel buzdolapları (cihaz tipi `RF`) de bulunur. Kayıtlar ve paketleme biçimi Smart Life uygulamasının kendi kodundan ve içindeki örnek belgelerden alınmıştır.
+
+| Varlık | Kayıt | Notlar |
+|---|---|---|
+| Kapı (binary sensor) | `RFDOORA` | `3` (ikisi de kapalı) dışındaki her değerde açık, uygulama da böyle yapar. Hangi kapının açık olduğu gösterilmez; ham değer nitelik olarak yer alır. |
+| Soğutucu / dondurucu sıcaklığı (select) | `RFTEMSE` | `(soğutucu °C << 8) \| mutlak(dondurucu °C)`. Seçenekler: soğutucu 2, 4, 5, 6, 8 °C; dondurucu -16, -18, -20, -22, -24 °C. |
+| Mod (select) | `RFMODEA` | Normal, Süper Dondurma, Süper Soğutma, Tatil, Ekonomi, Yapay Zeka. Aynı anda biri; modeliniz hepsini desteklemeyebilir. |
+| Çocuk kilidi, Ekran koruyucu (switch) | `RFCLOCK`, `RFSSAVE` | 0 / 1. |
+| Ham kayıtlar (tanı sensörleri, varsayılan kapalı) | hepsi | Bir tuşun neyi değiştirdiğini görmek için açın. |
+
+> ⚠️ **Gerçek bir buzdolabında henüz doğrulanmadı.** Okuma kısmı gerçek bir buzdolabından yapılan gözlemlerle ([tmturk2010](https://github.com/tmturk2010), PR #1 — teşekkürler) karşılaştırıldı; komutlar uygulamanın kurduğu biçimde oluşturuluyor, ancak donanımda kimse denemedi. Lütfen her seferinde tek değişiklik deneyin, buzdolabının kendi ekranına bakın ve sonucu bildirin. Buzdolapları periyodik sorgulanır (canlı mesaj yok), kapı sensörü yaklaşık bir dakika gecikebilir.
+
+---
+
+## 🏠 Diğer cihazlar (salt okunur)
+
+Hesaptaki çamaşır makineleri (`WM`), kurutmalı çamaşır makineleri (`WD`), kurutma makineleri (`TD`), bulaşık makineleri (`DW`), fırınlar (`OV`) ve buzdolabı-dondurucular (`FD`) de bulunur ve uygulamanın gösterdiklerini gösterir: durum, seçili program, kalan süre, kapak, uzaktan kontrol, çocuk kilidi ve hatalar ("Hata Var" sensörü etkin hataları listeler). Değerler, Smart Life uygulamasının her aile için içinde taşıdığı kayıt tablolarından gelir (`tools/extract_registers.py` bunları yeniden üretir).
+
+- **Bilerek salt okunur.** Uygulamanın bu cihazlar için komutları program başlatır; Home Assistant'tan yıkama başlatmak ya da fırını ısıtmak denenmedi ve dışarıda bırakıldı. Deneme için `send_raw_code` servisi duruyor.
+- **Gerçek cihazlarda doğrulanmadı.** Değer adları uygulamanın kendi (İngilizce) adlarıdır; yanlış görünen bir şey varsa bildirin. Buzdolabı-dondurucu (`FD`) sensör sıcaklıkları işaretli sayı olarak çözülür, bu bir tahmindir.
+- Yaklaşık dakikada bir sorgulanır.
 
 ---
 
@@ -549,6 +619,8 @@ APK içerisinde aşağıdaki alanlar tespit edilmiştir. Kullanılabilirlik klim
 | `ACVERSI` | Firmware bilgisi |
 
 Bazı cihazlarda bu alanlar hiç bulunmayabilir. Bu durumda ilgili özelliklerin kullanılamaması normaldir.
+
+> ℹ️ 2.0.0 sürümünde durum, Vestel'in yeni durum belgesinden ve cihazın canlı mesajlarından gelir. Yukarıdaki VOC, partikül, filtre ömrü ve UVC alanları yalnızca bu belgenin verdiği yerlerde dolar; bunları yalnızca ham kayıt olarak yayınlayan modellerde boş kalır. Bu kayıtların yeniden okunması planlanıyor.
 
 ---
 
@@ -572,7 +644,7 @@ Bu servisler özellikle yeni özelliklerin araştırılması için kullanılabil
 
 > ⚠️ Ne yaptığını bilmediğiniz değerleri cihaza göndermeyin.
 
----
+**Diğer cihazlardan birine mi sahipsin?** [`docs/device-testing.md`](docs/device-testing.md) buzdolabı, çamaşır makinesi, kurutma makinesi, bulaşık makinesi vb. için denenmeye değer kodları, her birinin ne yapması gerektiğini ve sonucu issue açarak nasıl bildireceğini listeler.
 
 ## 🔍 Yeni Özellik Keşfetme
 
@@ -594,13 +666,12 @@ Bu yöntemle dikey kanatçık, salınım, Turbo, Uyku, İyonizer, Tasarruf, Fan 
 
 ---
 
-## Emeği Geçenler
+## ❤️ Emeği Geçenler
 
 - Geliştiren ve sürdüren: **Mutlu Tekir**.
 - **Sezer İltekin**'in vestel-ac-remote-control web-panelinden esinlenilmiştir.
 Sezer İltekin'in projesi Vestel bulutunun ilk herkese açık keşiflerinden biriydi. Bu entegrasyondaki API istemcisi ayrı ve yeni bir uygulamadır: Vestel Smart Life uygulamasının kendi kodundan (APK analizi) ve gerçek bir hesapta gözlenen yanıtlardan yazılmıştır, o projeden kod alınmamıştır. Kaynaklar için `docs/protocol.md` dosyasına bak.
 - GPL-3.0 lisansıyla dağıtılır, bkz. [LICENSE](LICENSE).
- 
 
 ---
 
@@ -610,7 +681,7 @@ Bu proje resmi değildir ve Vestel ile bağlantılı değildir.
 
 Entegrasyon Vestel'in bulut API'sine bağlıdır. API, kimlik doğrulama sistemi veya servis tarafında yapılacak değişiklikler entegrasyonun çalışmasını engelleyebilir.
 
-Bazı özellikler klima modeli ve firmware sürümüne bağlıdır.
+Bazı özellikler cihaz modeli ve firmware sürümüne bağlıdır.
 
 Sorun yaşarsanız:
 
