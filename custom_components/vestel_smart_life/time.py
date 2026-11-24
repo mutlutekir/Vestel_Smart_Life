@@ -18,6 +18,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from . import VestelAcCoordinator
 from .api import VestelAcApi
@@ -68,5 +69,7 @@ class _VestelAcAutoOffTime(CoordinatorEntity[VestelAcCoordinator], TimeEntity):
         return dt.time(hour=hour, minute=minute)
 
     async def async_set_value(self, value: dt.time) -> None:
-        await self._api.async_set_auto_off(self._device_id, value.hour, value.minute)
+        await self._api.async_set_auto_off(
+            self._device_id, value.hour, value.minute, now=dt_util.now()
+        )
         await self.coordinator.async_request_refresh()

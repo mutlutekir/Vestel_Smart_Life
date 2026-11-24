@@ -26,6 +26,7 @@ from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 
 import aiohttp
 
+from . import appliances
 from .const import (
     API_BASE,
     AWS_IDENTITY_POOL_ID,
@@ -33,11 +34,18 @@ from .const import (
     AWS_USER_POOL_PROVIDER,
     AUTH_ENDPOINT,
     DEFAULT_SCOPES,
+    DEVICE_TYPE_FRIDGE,
     FAN_MAP,
+    FRIDGE_COOLER_TEMPS,
+    FRIDGE_DOOR_CLOSED,
+    FRIDGE_FREEZER_TEMPS,
+    FRIDGE_MODES,
+    LEGACY_DEVICE_TYPES,
     MAX_TEMP,
     MIN_TEMP,
     MODE_MAP,
     OFFTV_DISABLED,
+    SUPPORTED_DEVICE_TYPES,
     TOKEN_ENDPOINT,
 )
 
@@ -390,7 +398,7 @@ class VestelAcApi:
     # ------------------------------------------------------------------ #
 
     async def async_get_devices(self) -> list[dict[str, str]]:
-        """Return the air conditioners on the account."""
+        """Return the supported appliances (air conditioners and refrigerators) on the account."""
         homes = await self._request("GET", "v1.0/homes")
         devices: dict[str, dict[str, Any]] = {}
         for home in (homes or {}).get("items") or []:
@@ -399,7 +407,7 @@ class VestelAcApi:
                 continue
             body = await self._request("GET", f"v1.0/homes/{home_id}/devices")
             for item in ((body or {}).get("items") or {}).get("homeappliances") or []:
-                if item.get("deviceType") != "AC" or not item.get("deviceId"):
+                if item.get("deviceType") not in SUPPORTED_DEVICE_TYPES or not item.get("deviceId"):
                     continue
                 devices[item["deviceId"]] = {
                     "device_id": item["deviceId"],
@@ -412,12 +420,69 @@ class VestelAcApi:
         return list(devices.values())
 
     async def async_get_status(self, device_id: str) -> dict[str, Any]:
+        device = self._devices.get(device_id)
+        if device is not None and device["device_type"] in LEGACY_DEVICE_TYPES:
+            return await self._async_get_legacy_status(device_id, device["device_type"])
         body = await self._request("GET", f"v1.0/appliances/{device_id}/status")
         props = (body or {}).get("properties")
         if not isinstance(props, dict):
             raise VestelAcError(f"Unexpected status response for {device_id}")
         self._last_props[device_id] = props
         return self._build_status(device_id)
+
+    async def _async_get_legacy_status(self, device_id: str, device_type: str) -> dict[str, Any]:
+        """Read an appliance's registers (``RFxxxx``, ``WMxxxx``, ...) from the legacy status endpoint."""
+        body = await self._request(
+            "GET", f"v1.0/homeappliances/legacy/status?uuid={device_id}"
+        )
+        data = body.get("data") if isinstance(body, dict) else None
+        if not isinstance(data, dict):
+            raise VestelAcError(f"Unexpected status response for {device_id}: {body}")
+        registers = {k: v for k, v in data.items() if v is not None}
+        if device_type == DEVICE_TYPE_FRIDGE:
+            reported = self._parse_fridge(registers)
+        else:
+            reported = {"kind": device_type, "raw": dict(registers),
+                        **appliances.decode(device_type, registers)}
+        self._cloud_last[device_id] = dict(reported)
+        status = self._apply_pending(device_id, reported)
+        self._status[device_id] = status
+        return status
+
+    @staticmethod
+    def _parse_fridge(registers: dict[str, Any]) -> dict[str, Any]:
+        """Decode the refrigerator registers the way the app does.
+
+        RFDOORA: 3 = both doors closed, anything else = open.
+        RFTEMSE: (cooler degrees C << 8) | abs(freezer degrees C), the freezer being below zero.
+        RFMODEA: one mode at a time (see FRIDGE_MODES).
+        RFCLOCK / RFSSAVE: child lock / screen saver, 0 or 1.
+        """
+
+        def number(key: str) -> int | None:
+            try:
+                return int(registers[key])
+            except (KeyError, TypeError, ValueError):
+                return None
+
+        door = number("RFDOORA")
+        setpoints = number("RFTEMSE")
+        mode = number("RFMODEA")
+        child_lock = number("RFCLOCK")
+        screen_saver = number("RFSSAVE")
+        return {
+            "kind": DEVICE_TYPE_FRIDGE,
+            "door_raw": door,
+            "door_open": None if door is None else door != FRIDGE_DOOR_CLOSED,
+            "cooler_set": None if setpoints is None else (setpoints >> 8) & 0xFF,
+            "freezer_set": None if setpoints is None else -(setpoints & 0xFF),
+            "mode_raw": mode,
+            "mode": FRIDGE_MODES.get(mode) if mode is not None else None,
+            "child_lock": None if child_lock is None else bool(child_lock),
+            "screen_saver": None if screen_saver is None else bool(screen_saver),
+            "quick_drink_raw": number("RFDCOOL"),
+            "raw": dict(registers),
+        }
 
     def _build_status(self, device_id: str) -> dict[str, Any]:
         props = self._overlay(self._last_props[device_id], self._live.get(device_id))
@@ -686,7 +751,23 @@ class VestelAcApi:
         )
         return result
 
-    async def async_set_auto_off(self, device_id: str, hour: int, minute: int) -> dict[str, Any]:
+    async def async_set_clock(self, device_id: str, hour: int, minute: int) -> dict[str, Any]:
+        """Set the unit's own clock (ACSTCLK).
+
+        The unit has no way to learn the time by itself, and the auto-off timer is a
+        target clock time, so it only fires at the right moment if the unit's clock
+        is right. The Smart Life app sends the phone's local time every time its
+        timer screen is opened.
+        """
+        return await self._post_command(device_id, "ACSTCLK" + _pack((5, hour), (6, minute)))
+
+    async def async_set_auto_off(
+        self, device_id: str, hour: int, minute: int, *, now: Any = None
+    ) -> dict[str, Any]:
+        """Set the auto-off target time; with ``now`` (a datetime in local time), the
+        unit's clock is synchronised first, as the app does."""
+        if now is not None:
+            await self.async_set_clock(device_id, now.hour, now.minute)
         result = await self._post_command(
             device_id, "ACOFFTV" + _pack((5, hour), (6, minute))
         )
@@ -700,6 +781,49 @@ class VestelAcApi:
         self._expect(
             device_id, auto_off_enabled=False, auto_off_hour=None, auto_off_minute=None
         )
+        return result
+
+    # ---- refrigerators ------------------------------------------------ #
+
+    async def async_set_fridge_setpoints(
+        self, device_id: str, *, cooler: int | None = None, freezer: int | None = None
+    ) -> dict[str, Any]:
+        """Set the cooler and/or freezer temperature (degrees C; the freezer is negative).
+
+        Both go out in one register, so the one that is not changed is sent back as the
+        cloud reports it.
+        """
+        if cooler is not None and cooler not in FRIDGE_COOLER_TEMPS:
+            raise VestelAcError(f"Unsupported cooler temperature: {cooler}")
+        if freezer is not None and freezer not in FRIDGE_FREEZER_TEMPS:
+            raise VestelAcError(f"Unsupported freezer temperature: {freezer}")
+        status = self._status.get(device_id) or await self.async_get_status(device_id)
+        new_cooler = status.get("cooler_set") if cooler is None else cooler
+        new_freezer = status.get("freezer_set") if freezer is None else freezer
+        if new_cooler is None or new_freezer is None:
+            raise VestelAcError("The current refrigerator setpoints are not known yet")
+        code = "RFTEMSE" + f"{(new_cooler << 8) | abs(new_freezer):05d}"
+        result = await self._post_command(device_id, code)
+        self._expect(device_id, cooler_set=new_cooler, freezer_set=new_freezer)
+        return result
+
+    async def async_set_fridge_mode(self, device_id: str, mode_raw: int) -> dict[str, Any]:
+        """Select a refrigerator mode (RFMODEA); ``mode_raw`` is a key of FRIDGE_MODES."""
+        if mode_raw not in FRIDGE_MODES:
+            raise VestelAcError(f"Unsupported refrigerator mode: {mode_raw}")
+        result = await self._post_command(device_id, f"RFMODEA{mode_raw:05d}")
+        self._expect(device_id, mode_raw=mode_raw, mode=FRIDGE_MODES[mode_raw])
+        return result
+
+    async def async_set_fridge_flag(
+        self, device_id: str, register: str, on: bool
+    ) -> dict[str, Any]:
+        """Switch the child lock (RFCLOCK) or the screen saver (RFSSAVE)."""
+        keys = {"RFCLOCK": "child_lock", "RFSSAVE": "screen_saver"}
+        if register not in keys:
+            raise VestelAcError(f"Unsupported refrigerator switch: {register}")
+        result = await self._post_command(device_id, f"{register}{int(on):05d}")
+        self._expect(device_id, **{keys[register]: on})
         return result
 
     async def async_send_raw_code(self, device_id: str, code: str) -> dict[str, Any]:

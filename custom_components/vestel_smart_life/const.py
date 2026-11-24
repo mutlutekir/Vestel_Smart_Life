@@ -78,3 +78,33 @@ AWS_REGION = "eu-west-1"
 AWS_IDENTITY_POOL_ID = "eu-west-1:bb1ff9a2-6db0-4f3f-b630-62a9fc3bfbda"
 AWS_USER_POOL_PROVIDER = "cognito-idp.eu-west-1.amazonaws.com/eu-west-1_EgDdXOayO"
 AWS_IOT_HOST = "aa8u5ipzaqyfu-ats.iot.eu-west-1.amazonaws.com"
+
+# --- Refrigerators (device type "RF") -------------------------------------
+# Packing taken from the Smart Life app (RFCloudEntityToCloudDomain /
+# RFCloudDomainToCloudEntity) and its bundled sample documents (demo_rf.json).
+DEVICE_TYPE_AC = "AC"
+DEVICE_TYPE_FRIDGE = "RF"
+# Other families (washing machine, washer-dryer, tumble dryer, dishwasher, oven, fridge-freezer):
+# read only, see appliances.py.
+APPLIANCE_TYPES = ("WM", "WD", "TD", "DW", "OV", "FD")
+LEGACY_DEVICE_TYPES = (DEVICE_TYPE_FRIDGE, *APPLIANCE_TYPES)  # state comes from the register endpoint
+SUPPORTED_DEVICE_TYPES = (DEVICE_TYPE_AC, *LEGACY_DEVICE_TYPES)
+# Seconds between status requests for devices that are not air conditioners.
+LEGACY_POLL_SECONDS = 30
+
+# RFTEMSE = (cooler degrees C << 8) | abs(freezer degrees C). The values below are
+# the ones the app's sample document offers; a unit may allow fewer.
+FRIDGE_COOLER_TEMPS = (2, 4, 5, 6, 8)
+FRIDGE_FREEZER_TEMPS = (-16, -18, -20, -22, -24)
+
+# RFMODEA holds one mode at a time (the app compares for equality). The sample
+# document of one model lists only some of them; the app can send all of these.
+FRIDGE_MODES = {
+    0: "Normal",
+    2: "Süper Dondurma",
+    4: "Süper Soğutma",
+    8: "Tatil",
+    16: "Ekonomi",
+    32: "Yapay Zeka",
+}
+FRIDGE_DOOR_CLOSED = 3  # RFDOORA: the app treats every other value as "open"

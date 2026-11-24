@@ -1,35 +1,35 @@
 send_raw_code:
   name: Ham kod gönder (debug)
   description: >-
-    Vestel klimasına elle yazılmış bir komut kodu (ör. "ACSWUD00001") gönderir.
-    Yeni butonları (dikey salınım, ses/buzzer, vb.) tersine mühendislikle
-    çözerken denemeler yapmak için kullanılır.
+    Vestel cihazına elle yazılmış bir komut kodu (ör. "RFCLOCK00001") gönderir.
+    Yeni butonları tersine mühendislikle çözerken denemeler yapmak için
+    kullanılır. Denenecek kodlar için docs/device-testing.md dosyasına bakın.
   fields:
     device_id:
       name: Cihaz
-      description: Vestel Smart Life klima cihazı.
+      description: Vestel Smart Life cihazı (klima, buzdolabı, çamaşır makinesi, ...).
       required: true
       selector:
         device:
           integration: vestel_smart_life
     code:
       name: Kod
-      description: Gönderilecek ham komut kodu, ör. ACSWUD00001
+      description: Gönderilecek ham komut kodu, ör. RFCLOCK00001 (7 harfli kayıt adı + 5 haneli sayı)
       required: true
-      example: "ACSWUD00001"
+      example: "RFCLOCK00001"
       selector:
         text:
 
 dump_raw_status:
   name: Ham durumu göster (debug)
   description: >-
-    Vestel'in bulut API'sinden gelen tüm ham durum alanlarını (ACGENSI,
-    ACTEMOT dışındakiler dahil) bir bildirimde gösterir. Uygulamada bir
+    Vestel'in bulut API'sinden gelen tüm ham durum alanlarını (kayıtlar
+    dahil) bir bildirimde gösterir. Uygulamada bir
     tuşa basmadan önce/sonra çağırıp farkı bulmak için kullanılır.
   fields:
     device_id:
       name: Cihaz
-      description: Vestel Smart Life klima cihazı.
+      description: Vestel Smart Life cihazı (klima, buzdolabı, çamaşır makinesi, ...).
       required: true
       selector:
         device:

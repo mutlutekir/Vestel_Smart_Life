@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
+from time import monotonic
 from typing import Any
 
 import voluptuous as vol
@@ -28,7 +29,11 @@ from .const import (
     CONF_REDIRECT_URI,
     CONF_REFRESH_TOKEN,
     DEFAULT_SCAN_INTERVAL,
+    APPLIANCE_TYPES,
+    DEVICE_TYPE_AC,
+    DEVICE_TYPE_FRIDGE,
     DOMAIN,
+    LEGACY_POLL_SECONDS,
 )
 from .live import VestelLive
 
@@ -41,6 +46,7 @@ PLATFORMS: list[Platform] = [
     Platform.SWITCH,
     Platform.TIME,
     Platform.SENSOR,
+    Platform.BINARY_SENSOR,
 ]
 
 SERVICE_SEND_RAW_CODE = "send_raw_code"
@@ -77,7 +83,8 @@ def _find_stored_entry_for_device(
         return None, None
 
     for stored in hass.data.get(DOMAIN, {}).values():
-        if any(d["device_id"] == vestel_device_id for d in stored["devices"]):
+        known = stored["devices"] + stored.get("fridges", []) + stored.get("appliances", [])
+        if any(d["device_id"] == vestel_device_id for d in known):
             return stored, vestel_device_id
     return None, None
 
@@ -136,7 +143,13 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 class VestelAcCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     """Polls status for every known device and keeps it keyed by device_id."""
 
-    def __init__(self, hass: HomeAssistant, api: VestelAcApi, device_ids: list[str]) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        api: VestelAcApi,
+        device_ids: list[str],
+        slow_device_ids: list[str] | tuple[str, ...] = (),
+    ) -> None:
         super().__init__(
             hass,
             _LOGGER,
@@ -145,16 +158,36 @@ class VestelAcCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         )
         self.api = api
         self.device_ids = device_ids
+        # Appliances other than air conditioners change slowly: ask for them less often.
+        self._slow = set(slow_device_ids)
+        self._fetched_at: dict[str, float] = {}
 
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         result: dict[str, dict[str, Any]] = {}
-        try:
-            for device_id in self.device_ids:
+        failures: list[str] = []
+        for device_id in self.device_ids:
+            if (
+                device_id in self._slow
+                and self.data
+                and device_id in self.data
+                and monotonic() - self._fetched_at.get(device_id, 0) < LEGACY_POLL_SECONDS
+            ):
+                result[device_id] = self.data[device_id]
+                continue
+            try:
                 result[device_id] = await self.api.async_get_status(device_id)
-        except VestelAuthError as err:
-            raise ConfigEntryAuthFailed(f"Vestel authentication failed: {err}") from err
-        except VestelAcError as err:
-            raise UpdateFailed(f"Error talking to Vestel cloud: {err}") from err
+                self._fetched_at[device_id] = monotonic()
+            except VestelAuthError as err:
+                raise ConfigEntryAuthFailed(f"Vestel authentication failed: {err}") from err
+            except VestelAcError as err:
+                # One appliance failing must not blank out the others.
+                failures.append(f"{device_id}: {err}")
+                if self.data and device_id in self.data:
+                    result[device_id] = self.data[device_id]
+        if failures and len(failures) == len(self.device_ids):
+            raise UpdateFailed(f"Error talking to Vestel cloud: {'; '.join(failures)}")
+        if failures:
+            _LOGGER.warning("Could not refresh: %s", "; ".join(failures))
         return result
 
 
@@ -217,15 +250,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     try:
-        devices = await api.async_get_devices()
+        all_devices = await api.async_get_devices()
     except VestelAuthError as err:
         raise ConfigEntryAuthFailed(f"Vestel authentication failed: {err}") from err
     except VestelAcError as err:
         raise ConfigEntryNotReady(str(err)) from err
 
-    device_ids = [d["device_id"] for d in devices]
-    _async_remove_horizontal_louver_entities(hass, entry, device_ids)
-    coordinator = VestelAcCoordinator(hass, api, device_ids)
+    # Air conditioners and refrigerators have separate entity sets.
+    devices = [d for d in all_devices if d.get("device_type", DEVICE_TYPE_AC) == DEVICE_TYPE_AC]
+    fridges = [d for d in all_devices if d.get("device_type") == DEVICE_TYPE_FRIDGE]
+    appliances = [d for d in all_devices if d.get("device_type") in APPLIANCE_TYPES]
+    _async_remove_horizontal_louver_entities(hass, entry, [d["device_id"] for d in devices])
+    coordinator = VestelAcCoordinator(
+        hass,
+        api,
+        [d["device_id"] for d in all_devices],
+        [d["device_id"] for d in fridges + appliances],
+    )
     await coordinator.async_config_entry_first_refresh()
 
     live = _async_start_live(hass, api, coordinator, devices)
@@ -235,6 +276,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "api": api,
         "coordinator": coordinator,
         "devices": devices,
+        "fridges": fridges,
+        "appliances": appliances,
         "live": live,
     }
 

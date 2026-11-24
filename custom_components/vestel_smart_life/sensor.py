@@ -3,16 +3,20 @@ from __future__ import annotations
 
 from typing import Any
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, EntityCategory
+from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfTemperature, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import VestelAcCoordinator
-from .const import DOMAIN
+from . import VestelAcCoordinator, appliances
+from .const import DEVICE_TYPE_FRIDGE, DOMAIN
 
 # Numeric PM2.5 / TVOC fields are not present on every Vestel AC model.
 # If the cloud status contains any of these aliases, the corresponding
@@ -163,6 +167,26 @@ async def async_setup_entry(
                     )
                 )
 
+    # Refrigerators: every register the cloud returns, as a diagnostic sensor that is
+    # off by default. Meant for finding out what a register does (press a button on the
+    # fridge or in the app and watch which value changes).
+    for device in stored.get("fridges", []):
+        raw = coordinator.data.get(device["device_id"], {}).get("raw", {})
+        if isinstance(raw, dict):
+            for key in raw:
+                entities.append(
+                    _VestelRawSensor(coordinator, entry.entry_id, device, str(key), default_on=False)
+                )
+
+    # Other appliance families: one sensor per value the unit reports (read only).
+    for device in stored.get("appliances", []):
+        status = coordinator.data.get(device["device_id"], {})
+        by_role = {e["role"]: e for e in appliances.TABLE[device["device_type"]]["registers"]}
+        for role in status.get("values", {}):
+            entities.append(
+                _VestelApplianceSensor(coordinator, entry.entry_id, device, role, by_role.get(role))
+            )
+
     async_add_entities(entities)
 
 
@@ -182,7 +206,11 @@ class _VestelBaseSensor(CoordinatorEntity[VestelAcCoordinator], SensorEntity):
             identifiers={(DOMAIN, self._device_id)},
             manufacturer="Vestel",
             name=device.get("device_name", self._device_id),
-            model="Smart AC (WiFi)",
+            model=(
+                "Buzdolabı"
+                if device.get("device_type") == DEVICE_TYPE_FRIDGE
+                else appliances.FAMILY_NAMES.get(device.get("device_type"), "Smart AC (WiFi)")
+            ),
         )
         self._entry_id = entry_id
 
@@ -258,9 +286,10 @@ class _VestelErrorBitSensor(_VestelBaseSensor):
 
 
 class _VestelRawSensor(_VestelBaseSensor):
-    def __init__(self, coordinator, entry_id, device, key) -> None:
+    def __init__(self, coordinator, entry_id, device, key, default_on: bool = True) -> None:
         super().__init__(coordinator, entry_id, device)
         self._key = key
+        self._attr_entity_registry_enabled_default = default_on
         self._attr_name = f"Ham {key}"
         self._attr_unique_id = f"{entry_id}_{device['device_id']}_raw_{key.lower()}"
 
@@ -269,3 +298,30 @@ class _VestelRawSensor(_VestelBaseSensor):
         return _raw_value(
             self.coordinator.data.get(self._device_id, {}), self._key
         )
+
+
+class _VestelApplianceSensor(_VestelBaseSensor):
+    """A decoded value of a washing machine, dryer, dishwasher, oven or fridge-freezer."""
+
+    def __init__(self, coordinator, entry_id, device, role, entry) -> None:
+        super().__init__(coordinator, entry_id, device)
+        self._role = role
+        self._attr_name = "Hata" if role == "Error" else appliances.role_name(role)
+        self._attr_unique_id = (
+            f"{entry_id}_{device['device_id']}_app_{role.lower().replace('.', '_')}"
+        )
+        main = role == "Error" or role in appliances.MAIN_ROLES
+        self._attr_entity_category = None if main else EntityCategory.DIAGNOSTIC
+        if entry and entry["kind"] == "int":
+            unit = appliances.UNIT_FIXES.get(entry.get("unit"), entry.get("unit"))
+            self._attr_state_class = SensorStateClass.MEASUREMENT
+            if unit == "celsius":
+                self._attr_device_class = SensorDeviceClass.TEMPERATURE
+                self._attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+            elif unit == "minute":
+                self._attr_device_class = SensorDeviceClass.DURATION
+                self._attr_native_unit_of_measurement = UnitOfTime.MINUTES
+
+    @property
+    def native_value(self) -> Any:
+        return self.coordinator.data.get(self._device_id, {}).get("values", {}).get(self._role)
