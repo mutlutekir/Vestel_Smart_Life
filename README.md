@@ -337,6 +337,7 @@ Recommended workflow:
 ## ❤️ Credits
 
 - Developed and maintained by **Mutlu Tekir**.
+- Refrigerator observations: **tmturk2010**
 - Inspired by **Sezer İltekin**'s vestel-ac-remote-control web-panel.
 Sezer İltekin's project was an early public exploration of the Vestel cloud. The API client in this integration is a separate, new implementation: it is written from the Vestel Smart Life app's own code (APK analysis) and from responses observed on a real account, and no code was taken from that project. See `docs/protocol.md` for the sources.
 - Licensed under GPL-3.0, see [LICENSE](LICENSE).
@@ -669,6 +670,7 @@ Bu yöntemle dikey kanatçık, salınım, Turbo, Uyku, İyonizer, Tasarruf, Fan 
 ## ❤️ Emeği Geçenler
 
 - Geliştiren ve sürdüren: **Mutlu Tekir**.
+- Buzdolabı gözlemleri: **tmturk2010**
 - **Sezer İltekin**'in vestel-ac-remote-control web-panelinden esinlenilmiştir.
 Sezer İltekin'in projesi Vestel bulutunun ilk herkese açık keşiflerinden biriydi. Bu entegrasyondaki API istemcisi ayrı ve yeni bir uygulamadır: Vestel Smart Life uygulamasının kendi kodundan (APK analizi) ve gerçek bir hesapta gözlenen yanıtlardan yazılmıştır, o projeden kod alınmamıştır. Kaynaklar için `docs/protocol.md` dosyasına bak.
 - GPL-3.0 lisansıyla dağıtılır, bkz. [LICENSE](LICENSE).
