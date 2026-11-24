@@ -783,6 +783,8 @@ class VestelAcApi:
         )
         return result
 
+
+  
     # ---- refrigerators ------------------------------------------------ #
 
     async def async_set_fridge_setpoints(
